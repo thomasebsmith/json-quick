@@ -1,5 +1,6 @@
 # json-quick
 **A fast command-line utility for dealing with JSON**
+![build](https://github.com/thomasebsmith/json-quick/workflows/build/badge.svg)
 
 `json-quick` provides one fast, easy-to-use command for dealing with JSON
 on the command line. Current features include:
