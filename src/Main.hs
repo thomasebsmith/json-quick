@@ -39,7 +39,7 @@ commands = Map.fromList
   ]
 
 prettify :: CommandAction
-prettify inHandle outHandle  _ = do
+prettify inHandle outHandle _ = do
   contents <- B.hGetContents inHandle
   let prettified = Prettify.prettify contents
   B.hPut outHandle prettified
