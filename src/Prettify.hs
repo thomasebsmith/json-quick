@@ -2,52 +2,37 @@ module Prettify
 ( prettify
 ) where
 
-import qualified Data.ByteString as S
-import qualified Data.ByteString.Char8 as CS
 import qualified Data.ByteString.Lazy as B
+import qualified Data.ByteString.Lazy.Char8 as C
 
 data JSONToken = String | StringEscape | Value deriving (Enum)
 data JSONState = JSONState
   { token :: JSONToken
-  , currentIndent :: String
+  , currentIndent :: C.ByteString
   }
 
 prettify :: B.ByteString -> B.ByteString
-prettify input = output
-  where output = B.fromChunks chunks
-        (chunks, _) = B.foldrChunks accumulator initial input
-        initial =
-          ( [CS.singleton '\n']
-          , JSONState { token = Value, currentIndent = "" }
-          )
-        accumulator = \chunk (chunks, state) ->
-          let (newChunk, newState) = prettify' chunk state in
-              (newChunk:chunks, newState)
+prettify input = prettify' input initialState
+  where initialState = JSONState { token = Value, currentIndent = C.empty }
 
-prettify' :: S.ByteString -> JSONState -> (S.ByteString, JSONState)
-prettify' string state = (CS.pack chars, finalState)
-  where (chars, finalState) = analyze string state
+prettify' :: B.ByteString -> JSONState -> B.ByteString
+prettify' input state = output
+  where output = case C.uncons input of
+                   Just (char, chars) -> replacement `C.append` remaining
+                     where remaining = prettify' chars newState
+                           (replacement, newState) = process char state
+                   Nothing -> C.singleton '\n'
 
-singleIndent :: String
-singleIndent = "  "
-
-analyze :: S.ByteString -> JSONState -> (String, JSONState)
-analyze string state =
-  case CS.uncons string of
-    Just (char, chars) -> (prefix ++ suffix, finalState)
-      where (suffix, finalState) = analyze chars nextState
-            (prefix, nextState) = prettifyStep char state
-    Nothing -> ("", state)
-
-prettifyStep :: Char -> JSONState -> (String, JSONState)
-prettifyStep char state =
+process :: Char -> JSONState -> (C.ByteString, JSONState)
+process char state =
   case token state of
-    StringEscape -> ([char], state { token = String })
+    StringEscape -> (C.singleton char, state { token = String })
     String -> case char of
-                '\\' -> ([char], state { token = StringEscape })
-                '"'  -> ([char], state { token = Value })
-                otherwise -> ([char], state)
+                '\\' -> (C.singleton char, state { token = StringEscape })
+                '"'  -> (C.singleton char, state { token = Value })
+                otherwise -> (C.singleton char, state)
     Value -> case char of
+               '"' -> (C.singleton char, state { token = String })
                '[' -> increaseIndent
                '{' -> increaseIndent
                ']' -> decreaseIndent
@@ -58,17 +43,20 @@ prettifyStep char state =
                '\n' -> ignore
                '\r' -> ignore
                '\t' -> ignore
-               otherwise -> ([char], state)
-  where increasedIndent = singleIndent ++ currentIndent state
-        decreasedIndent = drop (length singleIndent) $ currentIndent state
+               otherwise -> (C.singleton char, state)
+  where increasedIndent = singleIndent `C.append` currentIndent state
+        decreasedIndent = C.drop (C.length singleIndent) $ currentIndent state
         increaseIndent =
-          ( char:'\n':increasedIndent
+          ( char `C.cons` '\n' `C.cons` increasedIndent
           , state { currentIndent = increasedIndent }
           )
         decreaseIndent =
-          ( '\n':decreasedIndent ++ [char]
+          ( ('\n' `C.cons` decreasedIndent) `C.append` C.singleton char
           , state { currentIndent = decreasedIndent }
           )
-        lineBreak = (char:'\n':currentIndent state, state)
-        addSpace = (char:' ':"", state)
-        ignore = ("", state)
+        lineBreak = (char `C.cons` '\n' `C.cons` currentIndent state, state)
+        addSpace = (char `C.cons` ' ' `C.cons` C.empty, state)
+        ignore = (C.empty, state)
+
+singleIndent :: C.ByteString
+singleIndent = C.pack "  "
