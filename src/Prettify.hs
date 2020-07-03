@@ -5,7 +5,7 @@ module Prettify
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.Lazy.Char8 as C
 
-data JSONToken = String | StringEscape | Value deriving (Enum)
+data JSONToken = String | StringEscape | Value | IndentIncrease Char
 data JSONState = JSONState
   { token :: JSONToken
   , currentIndent :: C.ByteString
@@ -33,8 +33,8 @@ process char state =
                 otherwise -> (C.singleton char, state)
     Value -> case char of
                '"' -> (C.singleton char, state { token = String })
-               '[' -> increaseIndent
-               '{' -> increaseIndent
+               '[' -> increaseIndentUnless ']'
+               '{' -> increaseIndentUnless '}'
                ']' -> decreaseIndent
                '}' -> decreaseIndent
                ',' -> lineBreak
@@ -44,11 +44,22 @@ process char state =
                '\r' -> ignore
                '\t' -> ignore
                otherwise -> (C.singleton char, state)
+    IndentIncrease unless ->
+      if char == unless then (C.singleton char, state { token = Value })
+                        else increaseIndent
   where increasedIndent = singleIndent `C.append` currentIndent state
         decreasedIndent = C.drop (C.length singleIndent) $ currentIndent state
+        increaseIndentUnless matchingChar =
+          ( C.singleton char
+          , state { token = IndentIncrease matchingChar }
+          )
+        (reprocessed, newState) = process char $ state
+          { token = Value
+          , currentIndent = increasedIndent
+          }
         increaseIndent =
-          ( char `C.cons` '\n' `C.cons` increasedIndent
-          , state { currentIndent = increasedIndent }
+          ( ('\n' `C.cons` increasedIndent) `C.append` reprocessed
+          , newState
           )
         decreaseIndent =
           ( ('\n' `C.cons` decreasedIndent) `C.append` C.singleton char
