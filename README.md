@@ -19,3 +19,6 @@ $ cabal run
 ## Features
 Current features include:
  - Prettifying
+
+## Reporting Issues
+Report issues [here](https://github.com/thomasebsmith/json-quick/issues).
