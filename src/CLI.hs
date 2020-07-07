@@ -2,10 +2,12 @@ module CLI
   ( Arguments
   , parseArgs
   , perform
+  , putErrLn
   , showUsage
   ) where
 
 import System.Environment
+import System.Exit
 import System.IO
 import Data.Maybe
 import qualified Data.ByteString.Lazy as B
@@ -16,11 +18,15 @@ type Command = String
 
 type Option = String
 type ShortOption = Char
-type LongOptions = Map.Map Option OptionType
+type LongOptions = Map.Map Option OptionData
 type ShortOptions = Map.Map ShortOption Option
 data CommandOptions = CommandOptions
   { long :: LongOptions
   , short :: ShortOptions
+  }
+data OptionData = OptionData
+  { optionType :: OptionType
+  , optionHelp :: (String, String)
   }
 data OptionType = Valued | Valueless deriving (Enum)
 
@@ -33,22 +39,26 @@ data GlobalOptionsData = GlobalOptionsData
   , outFileName :: Maybe String
   }
 
-parseArgs :: [String] -> Maybe (Command, Arguments)
+parseArgs :: [String] -> Either String (Command, Arguments)
 parseArgs allArgs = do
   (command, args) <- separate allArgs
   parsedArgs <- parse args command
   return (command, parsedArgs)
-    where separate (command:args) = Just (command, args)
-          separate _ = Nothing
+    where separate (command:args) = Right (command, args)
+          separate _ = Left "Expected a command, but no command was given."
           parse args command = Map.fromList <$> parseArgs' args command
 
-parseArgs' :: [String] -> Command -> Maybe [(Option, String)]
+parseArgs' :: [String] -> Command -> Either String [(Option, String)]
 parseArgs' (('-':'-':longOption):remaining) command = do
-  optionType <- getLong
-  case optionType of
+  theOptionType <- (case (optionType <$> getLong) of
+                     Just anOptionType -> Right anOptionType
+                     Nothing -> Left $ "Option --" ++ longOption ++
+                      " not found.")
+  case theOptionType of
     Valued -> case remaining of
                 (value:remaining) -> addArg longOption value remaining command
-                _ -> Nothing
+                _ -> Left $ "Expected an argument for option --" ++
+                      longOption ++ " but no argument was given."
     Valueless -> addArg longOption "" remaining command
   where getLong = global longOption `fallbackTo` local command longOption
         global option = Map.lookup option $ long globalOptions
@@ -57,18 +67,22 @@ parseArgs' (('-':'-':longOption):remaining) command = do
           Map.lookup option $ long localOptions
 
 parseArgs' (('-':shortOption:[]):remaining) command = do
-  longOption <- global shortOption `fallbackTo` local command shortOption
+  longOption <- case getLong of
+                  Just option -> Right option
+                  Nothing -> Left  $"Option -" ++ shortOption:" not found."
   parseArgs' (('-':'-':longOption):remaining) command
-  where global option = Map.lookup option $ short globalOptions
+  where getLong = global shortOption `fallbackTo` local command shortOption
+        global option = Map.lookup option $ short globalOptions
         local command option = do
           (_, localOptions) <- Map.lookup command commands
           Map.lookup option $ short localOptions
 
-parseArgs' [] _ = Just []
+parseArgs' (arg:_) _ = Left $ "Unexpected argument " ++ arg ++ "."
+parseArgs' _ _ = Right []
 
-parseArgs' _ _ = Nothing
 
-addArg :: Option -> String -> [String] -> String -> Maybe [(Option, String)]
+addArg :: Option -> String -> [String] -> String ->
+  Either String [(Option, String)]
 addArg option value remaining command =
   add value <$> parseArgs' remaining command
   where add value = ((option, value):)
@@ -86,13 +100,20 @@ perform command args = do
       hClose hIn
       hClose hOut
     Nothing -> do
+      putErrLn $ "Command " ++ command ++ " not found."
       showUsage
 
 globalOptions :: CommandOptions
 globalOptions = CommandOptions
   { long = Map.fromList
-      [ ("in",  Valued)
-      , ("out", Valued)
+      [ ("in" , OptionData
+          { optionType = Valued
+          , optionHelp = ("file", "Read input from *file* instead of stdin.")
+          })
+      , ("out", OptionData
+          { optionType = Valued
+          , optionHelp = ("file", "Write output to *file* instead of stdout.")
+          })
       ]
   , short = Map.fromList
       [ ('i', "in")
@@ -123,11 +144,26 @@ prettifyOptions = CommandOptions
   , short = Map.empty
   }
 
+usage :: CommandOptions -> String
+usage options = Map.foldrWithKey accumulator "" $ long options
+  where accumulator name option string = " " ++ thisOptionUsage ++ string
+          where thisOptionUsage = optionUsage name option
+
+optionUsage :: String -> OptionData -> String
+optionUsage name option = case optionType option of
+                            Valued -> "[--" ++ name ++ " <" ++ argument ++ ">]"
+                            Valueless -> "[--" ++ name ++ "]"
+  where (argument, _) = optionHelp option
 
 showUsage :: IO ()
 showUsage = do
   progName <- getProgName
-  putStrLn $ "Usage: " ++ progName ++ " <command> <arguments...>"
+  putErrLn $ "Usage: " ++ progName ++ " <command>" ++ usage globalOptions
+  putErrLn $ "Type \"" ++ progName ++ " --help\" for more options."
+  exitFailure
+
+putErrLn :: String -> IO ()
+putErrLn = hPutStrLn stderr
 
 fallbackTo :: Maybe a -> Maybe a -> Maybe a
 firstChoice `fallbackTo` secondChoice = case firstChoice of

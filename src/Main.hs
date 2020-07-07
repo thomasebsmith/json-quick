@@ -7,8 +7,9 @@ main :: IO ()
 main = do
   parsedArgs <- parseArgs <$> getArgs
   case parsedArgs of
-    Just (command, args) -> do
+    Right (command, args) -> do
       perform command args
-    Nothing -> do
+    Left errorMsg -> do
+      putErrLn errorMsg
       showUsage
       return ()
