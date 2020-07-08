@@ -10,6 +10,8 @@ import System.Environment
 import System.Exit
 import System.IO
 import Data.Maybe
+import Data.Version (showVersion)
+import Paths_json_quick (version)
 import qualified Data.ByteString.Lazy as B
 import qualified Data.Map as Map
 import qualified Prettify as Prettify
@@ -130,6 +132,7 @@ getGlobalOptionsData args = GlobalOptionsData
 commands :: Map.Map Command (CommandAction, CommandOptions)
 commands = Map.fromList
   [ ("prettify", (prettify, prettifyOptions))
+  , ("help", (help, helpOptions))
   ]
 
 prettify :: CommandAction
@@ -142,6 +145,54 @@ prettifyOptions :: CommandOptions
 prettifyOptions = CommandOptions
   { long = Map.empty
   , short = Map.empty
+  }
+
+help :: CommandAction
+help _ outHandle args = do
+  let commandToHelpWith = Map.lookup "with" args
+  case commandToHelpWith of
+    Just command -> return ()
+    Nothing -> hPutStr outHandle globalHelpText
+
+globalHelpText :: String
+globalHelpText = versionInformation ++ "\n" ++
+                 commandsInformation ++ "\n" ++
+                 optionsInformation globalOptions
+
+versionInformation :: String
+versionInformation = "json-quick v" ++ showVersion version ++ ".\n\
+                     \Originally written by Thomas Smith.\n\
+                     \License: MIT <https://mit-license.org>.\n\
+                     \Repo: <https://github.com/thomasebsmith/json-quick>.\n"
+
+commandsInformation :: String
+commandsInformation = "Available commands:\n" ++ commandsText
+  where commandsText = Map.foldrWithKey acc "" commands
+        acc name _ string = "\t" ++ name ++ "\n" ++ string
+
+optionsInformation :: CommandOptions -> String
+optionsInformation options = "Options:\n" ++ optionList
+  where optionList = Map.foldrWithKey acc "" $ long options
+        acc name option string = "\t" ++ describe name option ++ "\n" ++ string
+
+describe :: String -> OptionData -> String
+describe name option = optionUsage ++ ": " ++ description
+  where (argument, description) = optionHelp option
+        optionUsage = case optionType option of
+                         Valued -> name ++ " <" ++ argument ++ ">"
+                         Valueless -> name
+
+helpOptions :: CommandOptions
+helpOptions = CommandOptions
+  { long = Map.fromList
+    [ ("with", OptionData
+        { optionType = Valued
+        , optionHelp = ("command", "Get help for *command*.")
+        })
+    ]
+  , short = Map.fromList
+    [ ('w', "with")
+    ]
   }
 
 usage :: CommandOptions -> String
@@ -159,7 +210,7 @@ showUsage :: IO ()
 showUsage = do
   progName <- getProgName
   putErrLn $ "Usage: " ++ progName ++ " <command>" ++ usage globalOptions
-  putErrLn $ "Type \"" ++ progName ++ " --help\" for more options."
+  putErrLn $ "Type \"" ++ progName ++ " help\" for more options."
   exitFailure
 
 putErrLn :: String -> IO ()

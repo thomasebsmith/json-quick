@@ -14,6 +14,6 @@ extra-source-files:  CHANGELOG.md
 executable json-quick
   main-is:             Main.hs
   build-depends:       base ^>=4.13.0.0, bytestring, containers
-  other-modules:       CLI, Prettify
+  other-modules:       CLI, Paths_json_quick, Prettify
   hs-source-dirs:      src
   default-language:    Haskell2010
