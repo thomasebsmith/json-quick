@@ -34,7 +34,7 @@ data OptionType = Valued | Valueless deriving (Enum)
 
 type Arguments = Map.Map Option String
 
-type CommandAction = Handle -> Handle -> Arguments -> IO ()
+type CommandAction = Handle -> Handle -> Arguments -> IO (Maybe String)
 
 data GlobalOptionsData = GlobalOptionsData
   { inFileName :: Maybe String
@@ -89,7 +89,7 @@ addArg option value remaining command =
   add value <$> parseArgs' remaining command
   where add value = ((option, value):)
 
-perform :: Command -> Arguments -> IO ()
+perform :: Command -> Arguments -> IO (Maybe String)
 perform command args = do
   case Map.lookup command commands of
     Just (commandAction, _) -> do
@@ -98,23 +98,27 @@ perform command args = do
         inFileName globalData
       hOut <- maybe (return stdout) (flip openFile WriteMode) $
         outFileName globalData
-      commandAction hIn hOut args
+      actionError <- commandAction hIn hOut args
       hClose hIn
       hClose hOut
+      case actionError of
+        Just err -> do
+          return $ Just err
+        Nothing -> do
+          return Nothing
     Nothing -> do
-      putErrLn $ "Command " ++ command ++ " not found."
-      showUsage
+      return $ Just $ "Command " ++ command ++ " not found."
 
 globalOptions :: CommandOptions
 globalOptions = CommandOptions
   { long = Map.fromList
       [ ("in" , OptionData
           { optionType = Valued
-          , optionHelp = ("file", "Read input from *file* instead of stdin.")
+          , optionHelp = ("file", "Read input from <file> instead of stdin.")
           })
       , ("out", OptionData
           { optionType = Valued
-          , optionHelp = ("file", "Write output to *file* instead of stdout.")
+          , optionHelp = ("file", "Write output to <file> instead of stdout.")
           })
       ]
   , short = Map.fromList
@@ -140,6 +144,7 @@ prettify inHandle outHandle _ = do
   contents <- B.hGetContents inHandle
   let prettified = Prettify.prettify contents
   B.hPut outHandle prettified
+  return Nothing
 
 prettifyOptions :: CommandOptions
 prettifyOptions = CommandOptions
@@ -151,13 +156,35 @@ help :: CommandAction
 help _ outHandle args = do
   let commandToHelpWith = Map.lookup "with" args
   case commandToHelpWith of
-    Just command -> return ()
-    Nothing -> hPutStr outHandle globalHelpText
+    Just command -> do
+      let helpResult = helpTextFor command
+      case helpResult of
+        Right text -> do
+          hPutStr outHandle text
+          return Nothing
+        Left err -> do
+          return $ Just $ err
+    Nothing -> do
+      hPutStr outHandle globalHelpText
+      return Nothing
 
 globalHelpText :: String
-globalHelpText = versionInformation ++ "\n" ++
-                 commandsInformation ++ "\n" ++
-                 optionsInformation globalOptions
+globalHelpText = versionInformation ++
+                 "\nAvailable commands:\n" ++ commandsInformation ++
+                 "\nOptions:\n" ++
+                 optionsInformation globalOptions ++
+                 optionsInformation helpOptions
+
+helpTextFor :: Command -> Either String String
+helpTextFor command =
+  case maybeLocalOptions of
+    Just localOptions -> Right $ text localOptions
+    Nothing -> Left $ "Cannot get help for unrecognized command " ++ command ++
+                      "."
+  where text localOptions = versionInformation ++ "\nOptions:\n" ++
+                            optionsInformation globalOptions ++
+                            optionsInformation localOptions
+        maybeLocalOptions = snd <$> Map.lookup command commands
 
 versionInformation :: String
 versionInformation = "json-quick v" ++ showVersion version ++ ".\n\
@@ -166,28 +193,26 @@ versionInformation = "json-quick v" ++ showVersion version ++ ".\n\
                      \Repo: <https://github.com/thomasebsmith/json-quick>.\n"
 
 commandsInformation :: String
-commandsInformation = "Available commands:\n" ++ commandsText
-  where commandsText = Map.foldrWithKey acc "" commands
-        acc name _ string = "\t" ++ name ++ "\n" ++ string
+commandsInformation =  Map.foldrWithKey acc "" commands
+  where acc name _ string = "\t" ++ name ++ "\n" ++ string
 
 optionsInformation :: CommandOptions -> String
-optionsInformation options = "Options:\n" ++ optionList
-  where optionList = Map.foldrWithKey acc "" $ long options
-        acc name option string = "\t" ++ describe name option ++ "\n" ++ string
+optionsInformation options = Map.foldrWithKey acc "" $ long options
+  where acc name option string = "\t" ++ describe name option ++ "\n" ++ string
 
-describe :: String -> OptionData -> String
+describe :: Option -> OptionData -> String
 describe name option = optionUsage ++ ": " ++ description
   where (argument, description) = optionHelp option
         optionUsage = case optionType option of
-                         Valued -> name ++ " <" ++ argument ++ ">"
-                         Valueless -> name
+                         Valued -> "--" ++ name ++ " <" ++ argument ++ ">"
+                         Valueless -> "--" ++ name
 
 helpOptions :: CommandOptions
 helpOptions = CommandOptions
   { long = Map.fromList
     [ ("with", OptionData
         { optionType = Valued
-        , optionHelp = ("command", "Get help for *command*.")
+        , optionHelp = ("command", "Get help for <command>.")
         })
     ]
   , short = Map.fromList
