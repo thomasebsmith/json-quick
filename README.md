@@ -19,6 +19,8 @@ $ cabal run
 ## Features
 Current features include:
  - Prettifying
+ - JSON specification compliance.
+ - Fully-featured command-line interface.
 
 ## Reporting Issues
 Report issues [here](https://github.com/thomasebsmith/json-quick/issues).
