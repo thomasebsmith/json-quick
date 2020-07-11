@@ -8,6 +8,6 @@
  - Full support for command-line options
  - "Help" command prints detailed information about correct usage
 
-## 0.3.0 - In progress
+## 0.3.0 - Released 2020-07-11
  - Full conformance to JSON specification
- - Support for validation
+ - "Verify" command determines whether JSON is valid

@@ -1,7 +1,7 @@
 cabal-version:       2.4
 
 name:                json-quick
-version:             0.2.0.0
+version:             0.3.0.0
 synopsis:            A fast command-line utility for dealing with JSON
 homepage:            https://github.com/thomasebsmith/json-quick
 bug-reports:         https://github.com/thomasebsmith/json-quick/issues
