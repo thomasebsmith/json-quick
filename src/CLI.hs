@@ -1,5 +1,6 @@
 module CLI
   ( Arguments
+  , ExitResult (..)
   , parseArgs
   , perform
   , putErrLn
@@ -14,7 +15,8 @@ import Data.Version (showVersion)
 import Paths_json_quick (version)
 import qualified Data.ByteString.Lazy as B
 import qualified Data.Map as Map
-import qualified Prettify as Prettify
+import qualified Prettify
+import qualified Verify
 
 type Command = String
 
@@ -34,7 +36,9 @@ data OptionType = Valued | Valueless deriving (Enum)
 
 type Arguments = Map.Map Option String
 
-type CommandAction = Handle -> Handle -> Arguments -> IO (Maybe String)
+data ExitResult = ExitValid | ExitInvalidUsage String | ExitInvalid String
+
+type CommandAction = Handle -> Handle -> Arguments -> IO ExitResult
 
 data GlobalOptionsData = GlobalOptionsData
   { inFileName :: Maybe String
@@ -89,7 +93,7 @@ addArg option value remaining command =
   add value <$> parseArgs' remaining command
   where add value = ((option, value):)
 
-perform :: Command -> Arguments -> IO (Maybe String)
+perform :: Command -> Arguments -> IO ExitResult
 perform command args = do
   case Map.lookup command commands of
     Just (commandAction, _) -> do
@@ -98,16 +102,12 @@ perform command args = do
         inFileName globalData
       hOut <- maybe (return stdout) (flip openFile WriteMode) $
         outFileName globalData
-      actionError <- commandAction hIn hOut args
+      actionResult <- commandAction hIn hOut args
       hClose hIn
       hClose hOut
-      case actionError of
-        Just err -> do
-          return $ Just err
-        Nothing -> do
-          return Nothing
+      return actionResult
     Nothing -> do
-      return $ Just $ "Command " ++ command ++ " not found."
+      return $ ExitInvalidUsage $ "Command " ++ command ++ " not found."
 
 globalOptions :: CommandOptions
 globalOptions = CommandOptions
@@ -136,6 +136,7 @@ getGlobalOptionsData args = GlobalOptionsData
 commands :: Map.Map Command (CommandAction, CommandOptions)
 commands = Map.fromList
   [ ("prettify", (prettify, prettifyOptions))
+  , ("verify", (verify, verifyOptions))
   , ("help", (help, helpOptions))
   ]
 
@@ -144,10 +145,26 @@ prettify inHandle outHandle _ = do
   contents <- B.hGetContents inHandle
   let prettified = Prettify.prettify contents
   B.hPut outHandle prettified
-  return Nothing
+  return ExitValid
 
 prettifyOptions :: CommandOptions
 prettifyOptions = CommandOptions
+  { long = Map.empty
+  , short = Map.empty
+  }
+
+verify :: CommandAction
+verify inHandle outHandle _ = do
+  contents <- B.hGetContents inHandle
+  let isValid = Verify.verify contents
+  if isValid
+     then do
+       hPutStrLn outHandle "Valid JSON"
+       return ExitValid
+     else return $ ExitInvalid "Invalid JSON"
+
+verifyOptions :: CommandOptions
+verifyOptions = CommandOptions
   { long = Map.empty
   , short = Map.empty
   }
@@ -161,12 +178,12 @@ help _ outHandle args = do
       case helpResult of
         Right text -> do
           hPutStr outHandle text
-          return Nothing
+          return ExitValid
         Left err -> do
-          return $ Just $ err
+          return $ ExitInvalidUsage $ err
     Nothing -> do
       hPutStr outHandle globalHelpText
-      return Nothing
+      return ExitValid
 
 globalHelpText :: String
 globalHelpText = versionInformation ++

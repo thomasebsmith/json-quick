@@ -9,16 +9,19 @@ main = do
   parsedArgs <- parseArgs <$> getArgs
   case parsedArgs of
     Right (command, args) -> do
-      maybeError <- perform command args
-      case maybeError of
-        Just errorMsg -> do
-          showError errorMsg
-        Nothing -> do
-          return ()
+      exitResult <- perform command args
+      case exitResult of
+        ExitInvalidUsage errorMsg -> showBadUsage errorMsg
+        ExitInvalid errorMsg -> showError errorMsg
+        ExitValid -> return ()
     Left errorMsg -> do
-      showError errorMsg
+      showBadUsage errorMsg
+
+showBadUsage msg = do
+  putErrLn msg
+  showUsage
+  exitFailure
 
 showError msg = do
   putErrLn msg
-  showUsage
   exitFailure
