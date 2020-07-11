@@ -7,3 +7,7 @@
 ## 0.2.0 - Released 2020-07-08
  - Full support for command-line options
  - "Help" command prints detailed information about correct usage
+
+## 0.3.0 - In progress
+ - Full conformance to JSON specification
+ - Support for validation
