@@ -383,7 +383,9 @@ takeOnly "" = return True
 takeOnly (char:chars) = do
   next <- takeChar
   case next of
-    Just char -> takeOnly chars
+    Just nextChar -> if char == nextChar
+                        then takeOnly chars
+                        else return False
     _ -> return False
 
 peekChar :: State B.ByteString (Maybe Char)
