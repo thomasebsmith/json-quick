@@ -156,12 +156,13 @@ prettifyOptions = CommandOptions
 verify :: CommandAction
 verify inHandle outHandle _ = do
   contents <- B.hGetContents inHandle
-  let isValid = Verify.verify contents
-  if isValid
-     then do
+  let maybeError = Verify.verify contents
+  case maybeError of
+     Nothing -> do
        hPutStrLn outHandle "Valid JSON"
        return ExitValid
-     else return $ ExitInvalid "Invalid JSON"
+     Just err ->
+       return $ ExitInvalid err
 
 verifyOptions :: CommandOptions
 verifyOptions = CommandOptions

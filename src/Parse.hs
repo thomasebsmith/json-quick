@@ -2,20 +2,23 @@ module Parse
 ( parse
 , succeeded
 , JSONValue (..)
+, ParseError
 ) where
 
 import Prelude hiding (takeWhile)
 
 import Control.Monad.Trans.State.Lazy
 import Data.Char
+import Data.Maybe
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.Lazy.Char8 as C
 import qualified FailList as F
 
-type ParseResult = (Maybe JSONValue, B.ByteString)
+type ParseError = String
+type ParseResult = (Either ParseError JSONValue, B.ByteString)
 type JSONPair = (C.ByteString, JSONValue)
-data JSONValue = JSONObject (F.FailList JSONPair)
-               | JSONArray (F.FailList JSONValue)
+data JSONValue = JSONObject (F.FailList ParseError JSONPair)
+               | JSONArray (F.FailList ParseError JSONValue)
                | JSONNumber C.ByteString
                | JSONString C.ByteString
                | JSONTrue
@@ -24,19 +27,43 @@ data JSONValue = JSONObject (F.FailList JSONPair)
 parse :: B.ByteString -> ParseResult
 parse = runState takeValue
 
-succeeded :: ParseResult -> Bool
+succeeded :: ParseResult -> Maybe ParseError
 succeeded result = case result of
-                     (Just _, rest) ->
+                     (Right value, rest) ->
                        let nonWhitespace = snd $ runState takeWhitespace rest in
-                           B.null nonWhitespace
-                     _ -> False
+                           if B.null nonWhitespace
+                              then getError value
+                              else Just $
+                                "Unexpected tokens after end of JSON value (" ++
+                                firstFew nonWhitespace ++ ")"
+                     (Left err, _) -> Just err
 
-takeValue :: State B.ByteString (Maybe JSONValue)
+firstFew :: B.ByteString -> String
+firstFew string = takeUpTo 500 string ++ "..."
+
+takeUpTo :: Int -> B.ByteString -> String
+takeUpTo n str
+  | n <= 0 = ""
+  | otherwise = case C.uncons str of
+                  Nothing -> ""
+                  Just (char, chars) -> char:takeUpTo (n - 1) chars
+
+getError :: JSONValue -> Maybe ParseError
+getError (JSONObject list) = getErrorFromList $ snd <$> list
+getError (JSONArray list) = getErrorFromList list
+getError _ = Nothing
+
+getErrorFromList :: F.FailList ParseError JSONValue -> Maybe ParseError
+getErrorFromList list = case F.foldr (\_ acc -> acc) () list of
+                     Left err -> Just err
+                     _ -> Nothing
+
+takeValue :: State B.ByteString (Either ParseError JSONValue)
 takeValue = do
   takeWhitespace
   next <- peekChar
   case next of
-    Nothing -> return Nothing
+    Nothing -> return $ Left "Unexpected EOF while reading JSON value"
     Just char
       | char == '{' -> takeObject
       | char == '[' -> takeArray
@@ -46,42 +73,43 @@ takeValue = do
       | char == 't' -> takeTrue
       | char == 'f' -> takeFalse
       | char == 'n' -> takeNull
-      | otherwise -> return Nothing
+      | otherwise -> return $ Left $ "Unexpected character " ++ show char ++
+                                     " while reading JSON value"
 
-takeTrue :: State B.ByteString (Maybe JSONValue)
+takeTrue :: State B.ByteString (Either ParseError JSONValue)
 takeTrue = do
   succeeded <- takeOnly "true"
   if succeeded
-     then return $ Just JSONTrue
-     else return Nothing
+     then return $ Right JSONTrue
+     else return $ Left "Invalid literal beginning with 't'."
 
-takeFalse :: State B.ByteString (Maybe JSONValue)
+takeFalse :: State B.ByteString (Either ParseError JSONValue)
 takeFalse = do
   succeeded <- takeOnly "false"
   if succeeded
-     then return $ Just JSONFalse
-     else return Nothing
+     then return $ Right JSONFalse
+     else return $ Left "Invalid literal beginning with 'f'."
 
-takeNull :: State B.ByteString (Maybe JSONValue)
+takeNull :: State B.ByteString (Either ParseError JSONValue)
 takeNull = do
   succeeded <- takeOnly "null"
   if succeeded
-     then return $ Just JSONNull
-     else return Nothing
+     then return $ Right JSONNull
+     else return $ Left "Invalid literal beginning with 'n'."
 
-takeNegativeNumber :: State B.ByteString (Maybe JSONValue)
+takeNegativeNumber :: State B.ByteString (Either ParseError JSONValue)
 takeNegativeNumber = do
   takeChar -- the minus sign
   num <- takeNumber
   case num of
-    Just (JSONNumber str) -> return $ Just $ JSONNumber $ '-' `C.cons` str
-    _ -> return Nothing
+    Right (JSONNumber str) -> return $ Right $ JSONNumber $ '-' `C.cons` str
+    err -> return err
 
-takeNumber :: State B.ByteString (Maybe JSONValue)
+takeNumber :: State B.ByteString (Either ParseError JSONValue)
 takeNumber = do
   maybeDigit <- peekChar
   case maybeDigit of
-    Nothing -> return Nothing
+    Nothing -> return $ Left "Unexpected EOF while reading number"
     Just '0' -> do
       takeChar
       decimal <- takeDecimal
@@ -90,11 +118,11 @@ takeNumber = do
       num <- takeNumber'
       return $ JSONNumber <$> num
 
-takeNumber' :: State B.ByteString (Maybe C.ByteString)
+takeNumber' :: State B.ByteString (Either ParseError C.ByteString)
 takeNumber' = do
   maybeDigit <- peekChar
   case maybeDigit of
-    Nothing -> return $ Just C.empty
+    Nothing -> return $ Right C.empty
     Just char
       | isDigit char -> do
           takeChar
@@ -102,22 +130,22 @@ takeNumber' = do
           return $ (char `C.cons`) <$> remaining
       | otherwise -> takeDecimal
 
-takeDecimal :: State B.ByteString (Maybe C.ByteString)
+takeDecimal :: State B.ByteString (Either ParseError C.ByteString)
 takeDecimal = do
   maybeDot <- peekChar
   case maybeDot of
-    Nothing -> return $ Just C.empty
+    Nothing -> return $ Right C.empty
     Just '.' -> do
       takeChar
       decimal <- takeDecimal'
       return $ ('.' `C.cons`) <$> decimal
     _ -> takeExponent
 
-takeDecimal' :: State B.ByteString (Maybe C.ByteString)
+takeDecimal' :: State B.ByteString (Either ParseError C.ByteString)
 takeDecimal' = do
   maybeDigit <- takeChar
   case maybeDigit of
-    Nothing -> return Nothing
+    Nothing -> return $ Left "Unexpected EOF while reading number"
     Just digit
       | isDigit digit -> do
           next <- peekChar
@@ -129,26 +157,27 @@ takeDecimal' = do
               | otherwise -> do
                   exponent <- takeExponent
                   return $ (digit `C.cons`) <$> exponent
-            Nothing -> return $ Just $ C.singleton digit
-      | otherwise -> return Nothing
+            Nothing -> return $ Right $ C.singleton digit
+      | otherwise -> return $ Left $ "Unexpected character " ++
+                                     show digit ++ " while reading number"
 
-takeExponent :: State B.ByteString (Maybe C.ByteString)
+takeExponent :: State B.ByteString (Either ParseError C.ByteString)
 takeExponent = do
   maybeE <- peekChar
   case maybeE of
-    Nothing -> return $ Just $ C.empty
+    Nothing -> return $ Right $ C.empty
     Just char
       | char == 'e' || char == 'E' -> do
           takeChar
           exponent <- takeExponent'
           return $ (char `C.cons`) <$> exponent
-      | otherwise -> return $ Just $ C.empty
+      | otherwise -> return $ Right $ C.empty
 
-takeExponent' :: State B.ByteString (Maybe C.ByteString)
+takeExponent' :: State B.ByteString (Either ParseError C.ByteString)
 takeExponent' = do
   maybeSign <- peekChar
   case maybeSign of
-    Nothing -> return Nothing
+    Nothing -> return $ Left "Unexpected EOF while reading number"
     Just sign
       | sign == '+' || sign == '-' -> do
           takeChar
@@ -156,82 +185,97 @@ takeExponent' = do
           return $ (sign `C.cons`) <$> exponent
       | otherwise -> takeExponent''
 
-takeExponent'' :: State B.ByteString (Maybe C.ByteString)
+takeExponent'' :: State B.ByteString (Either ParseError C.ByteString)
 takeExponent'' = do
   maybeDigit <- takeChar
   case maybeDigit of
-    Nothing -> return Nothing
+    Nothing -> return $ Left "Unexpected EOF while reading number"
     Just digit
       | isDigit digit -> do
           digits <- takeWhile isDigit
-          return $ (digit `C.cons`) <$> digits
-      | otherwise -> return Nothing
+          return $ Right $ digit `C.cons` digits
+      | otherwise -> return $ Left $ "Unexpected character " ++ show digit ++
+                                     " while reading number"
 
 -- Take an array from input. Requires that an opening [ has been detected.
-takeArray :: State B.ByteString (Maybe JSONValue)
-takeArray = Just <$> (JSONArray <$> takeArray')
+takeArray :: State B.ByteString (Either ParseError JSONValue)
+takeArray = Right <$> (JSONArray <$> takeArray' True)
 
-takeArray' :: State B.ByteString (F.FailList JSONValue)
-takeArray' = do
+takeArray' :: Bool -> State B.ByteString (F.FailList ParseError JSONValue)
+takeArray' isFirst = do
   takeWhitespace
   maybeChar <- takeChar
   case maybeChar of
-    Nothing -> return F.Fail
+    Nothing -> return $ F.Fail "Unexpected EOF while reading array element"
     Just char
       | char == ']' -> return F.Empty
-      | char == '[' || char == ',' -> do
-          maybeValue <- takeValue
-          case maybeValue of
-            Nothing -> return F.Fail
-            Just value -> do
-              remaining <- takeArray'
-              return $ F.Cons value remaining
-      | otherwise -> return F.Fail
+      | isFirst || char == ',' -> do
+          takeWhitespace
+          next <- peekChar
+          if isFirst && next == Just ']'
+             then do
+               takeChar
+               return F.Empty
+             else do
+               maybeValue <- takeValue
+               case maybeValue of
+                 Left err -> return $ F.Fail err
+                 Right value -> do
+                   remaining <- takeArray' False
+                   return $ F.Cons value remaining
+      | otherwise -> return $ F.Fail $ "Unexpected character " ++ show char ++
+                                       " while reading array element"
 
 -- Take a string from input. Requires that an opening " has been detected.
-takeString :: State B.ByteString (Maybe JSONValue)
+takeString :: State B.ByteString (Either ParseError JSONValue)
 takeString = do
   takeChar
   maybeString <- takeString'
   return $ JSONString <$> maybeString
 
-takeString' :: State B.ByteString (Maybe C.ByteString)
+takeString' :: State B.ByteString (Either ParseError C.ByteString)
 takeString' = do
   maybeChar <- takeChar
   case maybeChar of
-    Nothing -> return Nothing
+    Nothing -> return $ Left "Unexpected EOF while reading string"
     Just '\\' -> do
       escaped <- takeEscape
       remaining <- takeString'
       return $ C.cons '\\' <$> (C.append <$> escaped <*> remaining)
     Just '"' -> do
-      return $ Just C.empty
+      return $ Right C.empty
     Just char -> do
       remaining <- takeString'
       return $ (char `C.cons`) <$> remaining
 
-takeEscape :: State B.ByteString (Maybe C.ByteString)
+takeEscape :: State B.ByteString (Either ParseError C.ByteString)
 takeEscape = do
   escapeType <- takeChar
   case escapeType of
-    Nothing -> return Nothing
+    Nothing -> return $ Left "Unexpected EOF while reading string escape"
     Just 'u' -> do
       hexDigits <- takeHexEscape
       return $ C.cons 'u' <$> hexDigits
     Just escape -> if isSingleEscapeChar escape
                       then do
-                        escaped <- takeChar
-                        return $ C.cons escape <$> C.singleton <$> escaped
-                      else return Nothing
+                        maybeEscaped <- takeChar
+                        case maybeEscaped of
+                          Nothing -> return $ Left "Unexpected EOF while\
+                                                   \ reading string escape"
+                          Just escaped -> return $ Right $
+                            escape `C.cons` C.singleton escaped
+                      else return $ Left $
+                        "Invalid string escape with character " ++ show escape
 
-takeHexEscape :: State B.ByteString (Maybe C.ByteString)
+takeHexEscape :: State B.ByteString (Either ParseError C.ByteString)
 takeHexEscape = do
   maybeDigits <- (sequence . take 4 . repeat) takeChar
   case sequence maybeDigits of
     Just digits -> if all isHexDigit digits
-                      then return $ Just $ C.pack digits
-                      else return Nothing
-    Nothing -> return Nothing
+                      then return $ Right $ C.pack digits
+                      else return $ Left $
+                        "Invalid unicode escape with digits " ++ digits
+    Nothing -> return $ Left "Unexpected EOF while reading unicode escape"
 
 isSingleEscapeChar :: Char -> Bool
 isSingleEscapeChar '"' = True
@@ -245,45 +289,52 @@ isSingleEscapeChar 't' = True
 isSingleEscapeChar '_' = False
 
 -- Takes an object from input. Requires that an initial { has been detected.
-takeObject :: State B.ByteString (Maybe JSONValue)
-takeObject = Just <$> JSONObject <$> takeObject'
+takeObject :: State B.ByteString (Either ParseError JSONValue)
+takeObject = Right <$> JSONObject <$> takeObject' True
 
-takeObject' :: State B.ByteString (F.FailList JSONPair)
-takeObject' = do
+takeObject' :: Bool -> State B.ByteString (F.FailList ParseError JSONPair)
+takeObject' isFirst = do
   takeWhitespace
   maybeChar <- takeChar
   case maybeChar of
-    Nothing -> return F.Fail
+    Nothing -> return $ F.Fail "Unexpected EOF while reading object"
     Just char
       | char == '}' -> return F.Empty
-      | char == '{' || char == ',' -> do
+      | (char == '{' && isFirst) || char == ',' -> do
           takeWhitespace
           nextChar <- takeChar
           case nextChar of
             Just '"' -> do
               maybeProp <- takeProperty
               case maybeProp of
-                Just prop -> do
-                  remaining <- takeObject'
+                Right prop -> do
+                  remaining <- takeObject' False
                   return $ F.Cons prop remaining
-                Nothing -> return F.Fail
-            _ -> return F.Fail
-      | otherwise -> return F.Fail
+                Left err -> return $ F.Fail err
+            Just otherChar -> return $ F.Fail $
+              "Unexpected " ++ show otherChar ++ " while reading object key"
+            Nothing -> return $ F.Fail "Unexpected EOF while reading object key"
+      | otherwise -> return $ F.Fail $
+          "Unexpected character " ++ show char ++ " while reading object"
 
-takeProperty :: State B.ByteString (Maybe (C.ByteString, JSONValue))
+takeProperty :: State B.ByteString (Either ParseError (C.ByteString, JSONValue))
 takeProperty = do
   maybeKey <- takeString'
   takeWhitespace
   maybeColon <- takeChar
   takeWhitespace
   case (maybeKey, maybeColon) of
-    (Just key, Just ':') -> do
+    (Right key, Just ':') -> do
       maybeValue <- takeValue
       case maybeValue of
-        Nothing -> return Nothing
-        Just value -> do
-          return $ Just (key, value)
-    _ -> return Nothing
+        Left err -> return $ Left err
+        Right value -> do
+          return $ Right (key, value)
+    (Left err, _) -> return $ Left err
+    (_, Just char) -> return $ Left $
+      "Unexpected " ++ show char ++
+      " while reading object property (expected ':')"
+    (_, Nothing) -> return $ Left "Unexpected EOF while reading object property"
 
 takeWhitespace :: State B.ByteString ()
 takeWhitespace = do
@@ -308,22 +359,24 @@ takeWithin char = do
                           maybeRest <- takeWithin char
                           return $ (nextChar `C.cons`) <$> maybeRest
 
--- Consumes and returns all characters while condition succeeds.
-takeWhile :: (Char -> Bool) -> State B.ByteString (Maybe C.ByteString)
+-- Consumes and returns all characters while condition succeeds or an EOF is
+-- reached.
+takeWhile :: (Char -> Bool) -> State B.ByteString C.ByteString
 takeWhile condition = takeUntil (not . condition)
 
--- Consumes and returns all characters before condition fails.
-takeUntil :: (Char -> Bool) -> State B.ByteString (Maybe C.ByteString)
+-- Consumes and returns all characters before condition fails or an EOF is
+-- reached.
+takeUntil :: (Char -> Bool) -> State B.ByteString C.ByteString
 takeUntil condition = do
   maybeChar <- peekChar
   case maybeChar of
-    Nothing -> return Nothing
+    Nothing -> return C.empty
     Just nextChar -> if condition nextChar
-                        then return $ Just $ C.empty
+                        then return C.empty
                         else do
                           takeChar
-                          maybeRest <- takeUntil condition
-                          return $ (nextChar `C.cons`) <$> maybeRest
+                          rest <- takeUntil condition
+                          return $ nextChar `C.cons` rest
 
 takeOnly :: String -> State B.ByteString Bool
 takeOnly "" = return True
