@@ -257,13 +257,7 @@ takeEscape = do
       hexDigits <- takeHexEscape
       return $ C.cons 'u' <$> hexDigits
     Just escape -> if isSingleEscapeChar escape
-                      then do
-                        maybeEscaped <- takeChar
-                        case maybeEscaped of
-                          Nothing -> return $ Left "Unexpected EOF while\
-                                                   \ reading string escape"
-                          Just escaped -> return $ Right $
-                            escape `C.cons` C.singleton escaped
+                      then return $ Right $ escape `C.cons` C.singleton escape
                       else return $ Left $
                         "Invalid string escape with character " ++ show escape
 
@@ -286,7 +280,7 @@ isSingleEscapeChar 'f' = True
 isSingleEscapeChar 'n' = True
 isSingleEscapeChar 'r' = True
 isSingleEscapeChar 't' = True
-isSingleEscapeChar '_' = False
+isSingleEscapeChar _ = False
 
 -- Takes an object from input. Requires that an initial { has been detected.
 takeObject :: State B.ByteString (Either ParseError JSONValue)
