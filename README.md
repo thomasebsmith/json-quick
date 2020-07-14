@@ -13,7 +13,7 @@ Requires:
 ```sh
 $ git clone https://github.com/thomasebsmith/json-quick.git
 $ cd json-quick
-$ cabal run
+$ cabal v2-run json-quick -- <options>
 ```
 
 ## Features
