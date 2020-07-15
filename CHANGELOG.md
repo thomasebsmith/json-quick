@@ -11,3 +11,7 @@
 ## 0.3.0 - Released 2020-07-11
  - Full conformance to JSON specification
  - "Verify" command determines whether JSON is valid
+
+## 0.4.0 - Released 2020-07-14
+ - Better code structure
+ - Unit testing for prettify and verify commands
