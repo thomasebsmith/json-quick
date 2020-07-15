@@ -28,6 +28,6 @@ test-suite json-quick-tests
   type:                exitcode-stdio-1.0
   main-is:             Main.hs
   build-depends:       base ^>=4.13.0.0, bytestring, hspec, json-quick
-  other-modules:       PrettifyTests
+  other-modules:       PrettifyTests, VerifyTests
   hs-source-dirs:      tests
   default-language:    Haskell2010
