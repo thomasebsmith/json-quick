@@ -15,3 +15,7 @@
 ## 0.4.0 - Released 2020-07-14
  - Better code structure
  - Unit testing for prettify and verify commands
+
+## 0.5.0 - Released 2020-07-15
+ - Detailed documentation available at
+   https://thomasebsmith.github.io/json-quick.

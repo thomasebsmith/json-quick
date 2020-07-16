@@ -22,5 +22,9 @@ Current features include:
  - JSON specification compliance.
  - Fully-featured command-line interface.
 
+## Documentation
+More detailed documentation is available on
+[the project site](https://thomasebsmith.github.io/json-quick).
+
 ## Reporting Issues
 Report issues [here](https://github.com/thomasebsmith/json-quick/issues).
