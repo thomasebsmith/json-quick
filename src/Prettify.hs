@@ -30,7 +30,7 @@ process char state =
     String -> case char of
                 '\\' -> (C.singleton char, state { token = StringEscape })
                 '"'  -> (C.singleton char, state { token = Value })
-                otherwise -> (C.singleton char, state)
+                _ -> (C.singleton char, state)
     Value -> case char of
                '"' -> (C.singleton char, state { token = String })
                '[' -> increaseIndentUnless ']'
@@ -43,7 +43,7 @@ process char state =
                '\n' -> ignore
                '\r' -> ignore
                '\t' -> ignore
-               otherwise -> (C.singleton char, state)
+               _ -> (C.singleton char, state)
     IndentIncrease unless ->
       if char == unless then (C.singleton char, state { token = Value })
                         else increaseIndent

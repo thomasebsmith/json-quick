@@ -9,7 +9,6 @@ import Prelude hiding (takeWhile)
 
 import Control.Monad.Trans.State.Lazy
 import Data.Char
-import Data.Maybe
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.Lazy.Char8 as C
 import qualified FailList as F
@@ -78,28 +77,28 @@ takeValue = do
 
 takeTrue :: State B.ByteString (Either ParseError JSONValue)
 takeTrue = do
-  succeeded <- takeOnly "true"
-  if succeeded
+  didSucceed <- takeOnly "true"
+  if didSucceed
      then return $ Right JSONTrue
      else return $ Left "Invalid literal beginning with 't'."
 
 takeFalse :: State B.ByteString (Either ParseError JSONValue)
 takeFalse = do
-  succeeded <- takeOnly "false"
-  if succeeded
+  didSucceed <- takeOnly "false"
+  if didSucceed
      then return $ Right JSONFalse
      else return $ Left "Invalid literal beginning with 'f'."
 
 takeNull :: State B.ByteString (Either ParseError JSONValue)
 takeNull = do
-  succeeded <- takeOnly "null"
-  if succeeded
+  didSucceed <- takeOnly "null"
+  if didSucceed
      then return $ Right JSONNull
      else return $ Left "Invalid literal beginning with 'n'."
 
 takeNegativeNumber :: State B.ByteString (Either ParseError JSONValue)
 takeNegativeNumber = do
-  takeChar -- the minus sign
+  _ <- takeChar -- the minus sign
   num <- takeNumber
   case num of
     Right (JSONNumber str) -> return $ Right $ JSONNumber $ '-' `C.cons` str
@@ -111,10 +110,10 @@ takeNumber = do
   case maybeDigit of
     Nothing -> return $ Left "Unexpected EOF while reading number"
     Just '0' -> do
-      takeChar
+      _ <- takeChar
       decimal <- takeDecimal
       return $ JSONNumber <$> ('0' `C.cons`) <$> decimal
-    Just char -> do
+    Just _ -> do
       num <- takeNumber'
       return $ JSONNumber <$> num
 
@@ -125,7 +124,7 @@ takeNumber' = do
     Nothing -> return $ Right C.empty
     Just char
       | isDigit char -> do
-          takeChar
+          _ <- takeChar
           remaining <- takeNumber'
           return $ (char `C.cons`) <$> remaining
       | otherwise -> takeDecimal
@@ -136,7 +135,7 @@ takeDecimal = do
   case maybeDot of
     Nothing -> return $ Right C.empty
     Just '.' -> do
-      takeChar
+      _ <- takeChar
       decimal <- takeDecimal'
       return $ ('.' `C.cons`) <$> decimal
     _ -> takeExponent
@@ -155,8 +154,8 @@ takeDecimal' = do
                   decimal <- takeDecimal'
                   return $ (digit `C.cons`) <$> decimal
               | otherwise -> do
-                  exponent <- takeExponent
-                  return $ (digit `C.cons`) <$> exponent
+                  theExponent <- takeExponent
+                  return $ (digit `C.cons`) <$> theExponent
             Nothing -> return $ Right $ C.singleton digit
       | otherwise -> return $ Left $ "Unexpected character " ++
                                      show digit ++ " while reading number"
@@ -168,9 +167,9 @@ takeExponent = do
     Nothing -> return $ Right $ C.empty
     Just char
       | char == 'e' || char == 'E' -> do
-          takeChar
-          exponent <- takeExponent'
-          return $ (char `C.cons`) <$> exponent
+          _ <- takeChar
+          theExponent <- takeExponent'
+          return $ (char `C.cons`) <$> theExponent
       | otherwise -> return $ Right $ C.empty
 
 takeExponent' :: State B.ByteString (Either ParseError C.ByteString)
@@ -180,9 +179,9 @@ takeExponent' = do
     Nothing -> return $ Left "Unexpected EOF while reading number"
     Just sign
       | sign == '+' || sign == '-' -> do
-          takeChar
-          exponent <- takeExponent''
-          return $ (sign `C.cons`) <$> exponent
+          _ <- takeChar
+          theExponent <- takeExponent''
+          return $ (sign `C.cons`) <$> theExponent
       | otherwise -> takeExponent''
 
 takeExponent'' :: State B.ByteString (Either ParseError C.ByteString)
@@ -214,7 +213,7 @@ takeArray' isFirst = do
           next <- peekChar
           if isFirst && next == Just ']'
              then do
-               takeChar
+               _ <- takeChar
                return F.Empty
              else do
                maybeValue <- takeValue
@@ -229,7 +228,7 @@ takeArray' isFirst = do
 -- Take a string from input. Requires that an opening " has been detected.
 takeString :: State B.ByteString (Either ParseError JSONValue)
 takeString = do
-  takeChar
+  _ <- takeChar
   maybeString <- takeString'
   return $ JSONString <$> maybeString
 
@@ -335,23 +334,10 @@ takeWhitespace = do
   char <- peekChar
   case isWhitespace <$> char of
     Just True -> do
-      takeChar
+      _ <- takeChar
       takeWhitespace
     _ -> do
       return ()
-
--- Consumes all characters up to and including char. However, only returns
--- characters before char.
-takeWithin :: Char -> State B.ByteString (Maybe C.ByteString)
-takeWithin char = do
-  maybeChar <- takeChar
-  case maybeChar of
-    Nothing -> return Nothing
-    Just nextChar -> if char == nextChar
-                        then return $ Just $ C.empty
-                        else do
-                          maybeRest <- takeWithin char
-                          return $ (nextChar `C.cons`) <$> maybeRest
 
 -- Consumes and returns all characters while condition succeeds or an EOF is
 -- reached.
@@ -368,7 +354,7 @@ takeUntil condition = do
     Just nextChar -> if condition nextChar
                         then return C.empty
                         else do
-                          takeChar
+                          _ <- takeChar
                           rest <- takeUntil condition
                           return $ nextChar `C.cons` rest
 
@@ -386,7 +372,7 @@ peekChar :: State B.ByteString (Maybe Char)
 peekChar = state $ \input ->
   case C.uncons input of
     Nothing -> (Nothing, input)
-    Just (char, chars) -> (Just char, input)
+    Just (char, _) -> (Just char, input)
 
 takeChar :: State B.ByteString (Maybe Char)
 takeChar = state $ \input ->

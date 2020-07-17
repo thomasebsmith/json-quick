@@ -10,7 +10,6 @@ module CLI
 import System.Environment
 import System.Exit
 import System.IO
-import Data.Maybe
 import Data.Version (showVersion)
 import Paths_json_quick (version)
 import qualified Data.ByteString.Lazy as B
@@ -55,21 +54,21 @@ parseArgs allArgs = do
           parse args command = Map.fromList <$> parseArgs' args command
 
 parseArgs' :: [String] -> Command -> Either String [(Option, String)]
-parseArgs' (('-':'-':longOption):remaining) command = do
+parseArgs' (('-':'-':longOption):args) command = do
   theOptionType <- (case (optionType <$> getLong) of
                      Just anOptionType -> Right anOptionType
                      Nothing -> Left $ "Option --" ++ longOption ++
                       " not found.")
   case theOptionType of
-    Valued -> case remaining of
+    Valued -> case args of
                 (value:remaining) -> addArg longOption value remaining command
                 _ -> Left $ "Expected an argument for option --" ++
                       longOption ++ " but no argument was given."
-    Valueless -> addArg longOption "" remaining command
+    Valueless -> addArg longOption "" args command
   where getLong = global longOption `fallbackTo` local command longOption
         global option = Map.lookup option $ long globalOptions
-        local command option = do
-          (_, localOptions) <- Map.lookup command commands
+        local cmd option = do
+          (_, localOptions) <- Map.lookup cmd commands
           Map.lookup option $ long localOptions
 
 parseArgs' (('-':shortOption:[]):remaining) command = do
@@ -79,8 +78,8 @@ parseArgs' (('-':shortOption:[]):remaining) command = do
   parseArgs' (('-':'-':longOption):remaining) command
   where getLong = global shortOption `fallbackTo` local command shortOption
         global option = Map.lookup option $ short globalOptions
-        local command option = do
-          (_, localOptions) <- Map.lookup command commands
+        local cmd option = do
+          (_, localOptions) <- Map.lookup cmd commands
           Map.lookup option $ short localOptions
 
 parseArgs' (arg:_) _ = Left $ "Unexpected argument " ++ arg ++ "."
@@ -91,7 +90,7 @@ addArg :: Option -> String -> [String] -> String ->
   Either String [(Option, String)]
 addArg option value remaining command =
   add value <$> parseArgs' remaining command
-  where add value = ((option, value):)
+  where add aValue = ((option, aValue):)
 
 perform :: Command -> Arguments -> IO ExitResult
 perform command args = do
@@ -219,11 +218,11 @@ optionsInformation options = Map.foldrWithKey acc "" $ long options
   where acc name option string = "\t" ++ describe name option ++ "\n" ++ string
 
 describe :: Option -> OptionData -> String
-describe name option = optionUsage ++ ": " ++ description
+describe name option = theOptionUsage ++ ": " ++ description
   where (argument, description) = optionHelp option
-        optionUsage = case optionType option of
-                         Valued -> "--" ++ name ++ " <" ++ argument ++ ">"
-                         Valueless -> "--" ++ name
+        theOptionUsage = case optionType option of
+                           Valued -> "--" ++ name ++ " <" ++ argument ++ ">"
+                           Valueless -> "--" ++ name
 
 helpOptions :: CommandOptions
 helpOptions = CommandOptions

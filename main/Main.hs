@@ -17,11 +17,13 @@ main = do
     Left errorMsg -> do
       showBadUsage errorMsg
 
+showBadUsage :: String -> IO ()
 showBadUsage msg = do
   putErrLn msg
   showUsage
   exitFailure
 
+showError :: String -> IO ()
 showError msg = do
   putErrLn msg
   exitFailure
