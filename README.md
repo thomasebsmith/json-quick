@@ -13,14 +13,16 @@ Requires:
 ```sh
 $ git clone https://github.com/thomasebsmith/json-quick.git
 $ cd json-quick
+$ cabal v2-test
 $ cabal v2-run json-quick -- <options>
 ```
 
 ## Features
 Current features include:
- - Prettifying
+ - Prettifying.
  - JSON specification compliance.
  - Fully-featured command-line interface.
+ - Detailed documentation.
 
 ## Documentation
 More detailed documentation is available on
