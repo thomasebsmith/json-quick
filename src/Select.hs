@@ -5,6 +5,7 @@ module Select
 , Selection
 ) where
 
+import Prelude hiding (takeWhile)
 import Control.Monad
 import Control.Monad.Trans.State.Lazy
 import Parse
@@ -13,7 +14,9 @@ import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.Lazy.Char8 as C
 import qualified FailList as F
 
-data Selection = SelectThis | Property B.ByteString Selection
+data Selection = SelectThis
+               | Property B.ByteString Selection
+               | AnyProperty Selection
 
 parseAndSelect :: B.ByteString -> B.ByteString -> Either ParseError JSONValue
 parseAndSelect toParse toSelect = result
@@ -37,19 +40,28 @@ parseSelection' = do
     Nothing -> return $ Right SelectThis
     Just '"' -> do
       maybeString <- takeString
-      takeWhitespace
-      maybeDot <- takeChar
-      maybeRemaining <- parseSelection'
-      case (maybeString, maybeDot, maybeRemaining) of
-        (Left err, _, _) -> return $ Left err
-        (_, _, Left err) -> return $ Left err
-        (Right string, Just '.', Right selection) -> return . Right $
-          Property string selection
-        (Right string, Nothing, Right selection) -> return . Right $
-          Property string selection
-        (_, Just other, _) -> return . Left $
-          "Expected '.' but found " ++ show other
-    Just otherChar -> return . Left $ "Unexpected character " ++ show otherChar
+      selection <- takeDotAndRemaining
+      return $ Property <$> maybeString <*> selection
+    Just '*' -> do
+      _ <- takeChar
+      selection <- takeDotAndRemaining
+      return $ AnyProperty <$> selection
+    Just otherChar
+      | isIdentifierChar otherChar -> do
+          identifier <- takeWhile isIdentifierChar
+          selection <- takeDotAndRemaining
+          return $ Property identifier <$> selection
+      | otherwise -> return . Left $ "Unexpected character " ++ show otherChar
+
+takeDotAndRemaining :: State B.ByteString (Either ParseError Selection)
+takeDotAndRemaining = do
+  takeWhitespace
+  maybeDot <- takeChar
+  maybeRemaining <- parseSelection'
+  case maybeDot of
+    Nothing -> return maybeRemaining
+    Just '.' -> return maybeRemaining
+    Just char -> return . Left $ "Expected '.' but found " ++ show char
 
 select :: Selection -> JSONValue -> Either ParseError JSONValue
 select SelectThis value = Right value
@@ -76,6 +88,23 @@ select (Property key selection) (JSONArray values) =
                                                   else Nothing
                         Nothing -> Nothing
 
+select (AnyProperty selection) (JSONObject props) =
+  JSONArray <$> join (F.foldr accumulate initialValue props)
+    where accumulate x acc = case select selection $ snd x of
+                               Right selected -> F.Cons selected <$> acc
+                               Left err -> Left err
+          initialValue = Right F.Empty
+
+select (AnyProperty selection) (JSONArray values) =
+  JSONArray <$> join (F.foldr accumulate initialValue values)
+    where accumulate x acc = case select selection $ x of
+                               Right selected -> F.Cons selected <$> acc
+                               Left err -> Left err
+          initialValue = Right F.Empty
+
 select (Property key _) _ = Left $
   "Cannot select property " ++ show key ++
   " from non-object and non-array value"
+
+select (AnyProperty _) _ = Left $
+  "Cannot select any property from non-object and non-array value"

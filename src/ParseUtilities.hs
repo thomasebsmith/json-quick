@@ -7,6 +7,7 @@ module ParseUtilities
 , takeOnly
 , takeChar
 , peekChar
+, isIdentifierChar
 , isWhitespace
 , ParseError
 ) where
@@ -126,6 +127,13 @@ takeChar = state $ \input ->
   case C.uncons input of
     Nothing -> (Nothing, input)
     Just (char, chars) -> (Just char, chars)
+
+isIdentifierChar :: Char -> Bool
+isIdentifierChar char
+  | isAlphaNum char = True
+  | char == '$' = True
+  | char == '_' = True
+  | otherwise = False
 
 isWhitespace :: Char -> Bool
 isWhitespace char = case char of
