@@ -50,7 +50,7 @@ takeEscape = do
       hexDigits <- takeHexEscape
       return $ C.cons 'u' <$> hexDigits
     Just escape -> if isSingleEscapeChar escape
-                      then return $ Right $ escape `C.cons` C.singleton escape
+                      then return $ Right $ C.singleton escape
                       else return $ Left $
                         "Invalid string escape with character " ++ show escape
 
