@@ -10,11 +10,15 @@ module CLI
 import System.Environment
 import System.Exit
 import System.IO
+import Data.Maybe
 import Data.Version (showVersion)
 import Paths_json_quick (version)
 import qualified Data.ByteString.Lazy as B
+import qualified Data.ByteString.Lazy.Char8 as C
 import qualified Data.Map as Map
+import qualified Parse
 import qualified Prettify
+import qualified Select
 import qualified Verify
 
 type Command = String
@@ -111,7 +115,7 @@ perform command args = do
 globalOptions :: CommandOptions
 globalOptions = CommandOptions
   { long = Map.fromList
-      [ ("in" , OptionData
+      [ ("in", OptionData
           { optionType = Valued
           , optionHelp = ("file", "Read input from <file> instead of stdin.")
           })
@@ -135,6 +139,7 @@ getGlobalOptionsData args = GlobalOptionsData
 commands :: Map.Map Command (CommandAction, CommandOptions)
 commands = Map.fromList
   [ ("prettify", (prettify, prettifyOptions))
+  , ("select", (select, selectOptions))
   , ("verify", (verify, verifyOptions))
   , ("help", (help, helpOptions))
   ]
@@ -150,6 +155,34 @@ prettifyOptions :: CommandOptions
 prettifyOptions = CommandOptions
   { long = Map.empty
   , short = Map.empty
+  }
+
+select :: CommandAction
+select inHandle outHandle args = do
+  contents <- B.hGetContents inHandle
+  let pattern = fromMaybe "" $ Map.lookup "pattern" args
+  let selected = Select.parseAndSelect contents $ C.pack pattern 
+  case selected of
+    Left err -> return $ ExitInvalid err
+    Right result -> do
+      case Parse.showAsByteString result of
+        Just output -> do
+          C.hPutStr outHandle output
+          return ExitValid
+        Nothing -> return $ ExitInvalid "Could not convert selected\
+                                        \ JSON to string"
+
+selectOptions :: CommandOptions
+selectOptions = CommandOptions
+  { long = Map.fromList
+      [ ("pattern", OptionData
+          { optionType = Valued
+          , optionHelp = ("pattern", "Select using <pattern>.")
+          })
+      ]
+  , short = Map.fromList
+      [ ('p', "pattern")
+      ]
   }
 
 verify :: CommandAction

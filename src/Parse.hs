@@ -1,19 +1,19 @@
 module Parse
 ( parse
+, showAsByteString
 , succeeded
 , JSONValue (..)
 , ParseError
 ) where
 
 import Prelude hiding (takeWhile)
-
 import Control.Monad.Trans.State.Lazy
 import Data.Char
+import ParseUtilities
 import qualified Data.ByteString.Lazy as B
 import qualified Data.ByteString.Lazy.Char8 as C
 import qualified FailList as F
 
-type ParseError = String
 type ParseResult = (Either ParseError JSONValue, B.ByteString)
 type JSONPair = (C.ByteString, JSONValue)
 data JSONValue = JSONObject (F.FailList ParseError JSONPair)
@@ -21,7 +21,46 @@ data JSONValue = JSONObject (F.FailList ParseError JSONPair)
                | JSONNumber C.ByteString
                | JSONString C.ByteString
                | JSONTrue
-               | JSONFalse | JSONNull
+               | JSONFalse
+               | JSONNull
+
+type JSONOutputOptions = ()
+
+defaultOptions :: JSONOutputOptions
+defaultOptions = ()
+
+showAsByteString :: JSONValue -> Maybe B.ByteString
+showAsByteString input = (`C.append` C.singleton '\n') <$> shown
+  where shown = showAsByteString' defaultOptions input
+
+showAsByteString' :: JSONOutputOptions -> JSONValue -> Maybe C.ByteString
+showAsByteString' opts (JSONObject props) =
+  case showFailList $ showProp <$> props of
+    Just text -> Just $ ('{' `C.cons` text) `C.append` C.singleton '}'
+    Nothing -> Nothing
+  where showProp (key, val) = C.append <$> showKey key <*> showValue val
+        showKey key = showAsByteString' opts $ JSONString key
+        showValue val = C.cons ':' <$> showAsByteString' opts val
+showAsByteString' opts (JSONArray list) =
+  case showFailList $ showAsByteString' opts <$> list of
+    Just listText -> Just $ ('[' `C.cons` listText) `C.append` C.singleton ']'
+    Nothing -> Nothing
+showAsByteString' _ (JSONNumber number) = Just number
+showAsByteString' _ (JSONString string) =
+  Just $ ('"' `C.cons` string) `C.append` C.singleton '"'
+showAsByteString' _ JSONTrue = Just $ C.pack "true"
+showAsByteString' _ JSONFalse = Just $ C.pack "false"
+showAsByteString' _ JSONNull = Just $ C.pack "null"
+
+showFailList :: F.FailList e (Maybe C.ByteString) -> Maybe C.ByteString
+showFailList (F.Fail _) = Nothing
+showFailList F.Empty = Just C.empty
+showFailList (F.Cons (Just x) xs@(F.Cons _ _)) = C.append x <$>
+                                                 C.cons ',' <$>
+                                                 showFailList xs
+showFailList (F.Cons Nothing _) = Nothing
+showFailList (F.Cons x F.Empty) = x
+showFailList (F.Cons _ (F.Fail _)) = Nothing
 
 parse :: B.ByteString -> ParseResult
 parse = runState takeValue
@@ -68,7 +107,9 @@ takeValue = do
       | char == '[' -> takeArray
       | char == '-' -> takeNegativeNumber
       | isDigit char -> takeNumber
-      | char == '"' -> takeString
+      | char == '"' -> do
+          string <- takeString
+          return $ JSONString <$> string
       | char == 't' -> takeTrue
       | char == 'f' -> takeFalse
       | char == 'n' -> takeNull
@@ -225,62 +266,6 @@ takeArray' isFirst = do
       | otherwise -> return $ F.Fail $ "Unexpected character " ++ show char ++
                                        " while reading array element"
 
--- Take a string from input. Requires that an opening " has been detected.
-takeString :: State B.ByteString (Either ParseError JSONValue)
-takeString = do
-  _ <- takeChar
-  maybeString <- takeString'
-  return $ JSONString <$> maybeString
-
-takeString' :: State B.ByteString (Either ParseError C.ByteString)
-takeString' = do
-  maybeChar <- takeChar
-  case maybeChar of
-    Nothing -> return $ Left "Unexpected EOF while reading string"
-    Just '\\' -> do
-      escaped <- takeEscape
-      remaining <- takeString'
-      return $ C.cons '\\' <$> (C.append <$> escaped <*> remaining)
-    Just '"' -> do
-      return $ Right C.empty
-    Just char -> do
-      remaining <- takeString'
-      return $ (char `C.cons`) <$> remaining
-
-takeEscape :: State B.ByteString (Either ParseError C.ByteString)
-takeEscape = do
-  escapeType <- takeChar
-  case escapeType of
-    Nothing -> return $ Left "Unexpected EOF while reading string escape"
-    Just 'u' -> do
-      hexDigits <- takeHexEscape
-      return $ C.cons 'u' <$> hexDigits
-    Just escape -> if isSingleEscapeChar escape
-                      then return $ Right $ escape `C.cons` C.singleton escape
-                      else return $ Left $
-                        "Invalid string escape with character " ++ show escape
-
-takeHexEscape :: State B.ByteString (Either ParseError C.ByteString)
-takeHexEscape = do
-  maybeDigits <- (sequence . take 4 . repeat) takeChar
-  case sequence maybeDigits of
-    Just digits -> if all isHexDigit digits
-                      then return $ Right $ C.pack digits
-                      else return $ Left $
-                        "Invalid unicode escape with digits " ++ digits
-    Nothing -> return $ Left "Unexpected EOF while reading unicode escape"
-
-isSingleEscapeChar :: Char -> Bool
-isSingleEscapeChar '"' = True
-isSingleEscapeChar '\\' = True
-isSingleEscapeChar '/' = True
-isSingleEscapeChar 'b' = True
-isSingleEscapeChar 'f' = True
-isSingleEscapeChar 'n' = True
-isSingleEscapeChar 'r' = True
-isSingleEscapeChar 't' = True
-isSingleEscapeChar _ = False
-
 -- Takes an object from input. Requires that an initial { has been detected.
 takeObject :: State B.ByteString (Either ParseError JSONValue)
 takeObject = Right <$> JSONObject <$> takeObject' True
@@ -328,62 +313,3 @@ takeProperty = do
       "Unexpected " ++ show char ++
       " while reading object property (expected ':')"
     (_, Nothing) -> return $ Left "Unexpected EOF while reading object property"
-
-takeWhitespace :: State B.ByteString ()
-takeWhitespace = do
-  char <- peekChar
-  case isWhitespace <$> char of
-    Just True -> do
-      _ <- takeChar
-      takeWhitespace
-    _ -> do
-      return ()
-
--- Consumes and returns all characters while condition succeeds or an EOF is
--- reached.
-takeWhile :: (Char -> Bool) -> State B.ByteString C.ByteString
-takeWhile condition = takeUntil (not . condition)
-
--- Consumes and returns all characters before condition fails or an EOF is
--- reached.
-takeUntil :: (Char -> Bool) -> State B.ByteString C.ByteString
-takeUntil condition = do
-  maybeChar <- peekChar
-  case maybeChar of
-    Nothing -> return C.empty
-    Just nextChar -> if condition nextChar
-                        then return C.empty
-                        else do
-                          _ <- takeChar
-                          rest <- takeUntil condition
-                          return $ nextChar `C.cons` rest
-
-takeOnly :: String -> State B.ByteString Bool
-takeOnly "" = return True
-takeOnly (char:chars) = do
-  next <- takeChar
-  case next of
-    Just nextChar -> if char == nextChar
-                        then takeOnly chars
-                        else return False
-    _ -> return False
-
-peekChar :: State B.ByteString (Maybe Char)
-peekChar = state $ \input ->
-  case C.uncons input of
-    Nothing -> (Nothing, input)
-    Just (char, _) -> (Just char, input)
-
-takeChar :: State B.ByteString (Maybe Char)
-takeChar = state $ \input ->
-  case C.uncons input of
-    Nothing -> (Nothing, input)
-    Just (char, chars) -> (Just char, chars)
-
-isWhitespace :: Char -> Bool
-isWhitespace char = case char of
-                      ' ' -> True
-                      '\n' -> True
-                      '\t' -> True
-                      '\r' -> True
-                      _ -> False
