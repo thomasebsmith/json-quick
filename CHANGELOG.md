@@ -19,3 +19,8 @@
 ## 0.5.0 - Released 2020-07-15
  - Detailed documentation available at
    https://thomasebsmith.github.io/json-quick.
+
+## 0.6.0 - Released 2020-07-20
+ - Selection syntax
+ - "Select" command allows selection of a subset of JSON input based on
+   property names, indices, and more.
