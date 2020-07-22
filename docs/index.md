@@ -22,15 +22,16 @@ the following commands are available:
 
 ## General Options
 These options are available for any command:
- - `--in <file>`, `-i <file>`: Reads input from *<file>* instead of stdin.
- - `--out <file>`, `-o <file>`: Writes output to *<file>* instead of stdout.
+ - `--in <file>`, `-i <file>`: Reads input from *&lt;file&gt;* instead of stdin.
+ - `--out <file>`, `-o <file>`: Writes output to *&lt;file&gt;* instead of
+   stdout.
 
 ## Help Command
 Displays general and command-specific usage and version information.
 
 Options:
  - `--with <command>`, `-w <command>`: Displays usage information for
-   *<command>*.
+   *&lt;command&gt;*.
 
 ## Prettify Command
 Pretty-prints any JSON given as input. Currently, this command always indents
@@ -42,7 +43,7 @@ Selects a subset of the JSON that is given as input. Uses
 [selection syntax](#selection-syntax) for patterns.
 
 Options:
- - `--pattern <pattern>`, `-p <pattern>`: Selects using *<pattern>*. If no
+ - `--pattern <pattern>`, `-p <pattern>`: Selects using *&lt;pattern&gt;*. If no
    pattern is specified, the entire JSON object is selected.
 
 ## Verify Command
