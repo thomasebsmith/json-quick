@@ -23,6 +23,7 @@ Current features include:
  - JSON specification compliance.
  - Fully-featured command-line interface.
  - Detailed documentation.
+ - JSON parsing and property selection.
 
 ## Documentation
 More detailed documentation is available on
