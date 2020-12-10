@@ -48,6 +48,8 @@ data GlobalOptionsData = GlobalOptionsData
   , outFileName :: Maybe String
   }
 
+-- | 'parseArgs' parses a list of command line arguments into a Left String
+-- (an error) or a command and its arguments.
 parseArgs :: [String] -> Either String (Command, Arguments)
 parseArgs allArgs = do
   (command, args) <- separate allArgs
