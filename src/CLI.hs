@@ -98,6 +98,7 @@ addArg option value remaining command =
   add value <$> parseArgs' remaining command
   where add aValue = ((option, aValue):)
 
+-- | Performs command with the given arguments. Returns the result.
 perform :: Command -> Arguments -> IO ExitResult
 perform command args = do
   case Map.lookup command commands of
